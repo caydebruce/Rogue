@@ -287,7 +287,7 @@ impl State {
 fn main() -> rltk::BError {
     use rltk::RltkBuilder;
     let mut context = RltkBuilder::simple80x50()
-        .with_title("Roguelike Tutorial")
+        .with_title("Rusty Descent")
         .build()?;
     context.with_post_scanlines(true);
     let mut gs = State {
@@ -333,7 +333,7 @@ fn main() -> rltk::BError {
     gs.ecs.insert(Point::new(player_x, player_y));
     gs.ecs.insert(player_entity);
     gs.ecs.insert(RunState::MainMenu{ menu_selection: gui::MainMenuSelection::NewGame });
-    gs.ecs.insert(gamelog::GameLog{ entries : vec!["Welcome to Rusty Roguelike".to_string()] });
+    gs.ecs.insert(gamelog::GameLog{ entries : vec!["Welcome to Rusty Descent".to_string()] });
 
     rltk::main_loop(context, gs)
 }
