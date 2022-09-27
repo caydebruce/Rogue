@@ -1,15 +1,14 @@
-use rltk::{RGB, Rltk, Point, VirtualKeyCode};
+use rltk::{ RGB, Rltk, Point, VirtualKeyCode };
 use specs::prelude::*;
-use super::{CombatStats, Player, gamelog::GameLog, Map, Name, Position, State, InBackpack, Viewshed, RunState};
+use super::{CombatStats, Player, gamelog::GameLog, Map, Name, Position, State, InBackpack,
+    Viewshed, RunState};
 
-#[derive(PartialEq, Copy, Clone)]
-pub enum MainMenuSelection {NewGame, LoadGame, Quit}
-
-#[derive(PartialEq, Copy, Clone)]
-pub enum MainMenuResult {NoSelection{selected: MainMenuSelection}, Selected{selected: MainMenuSelection}}
-
-pub fn draw_ui(ecs: &World, ctx: &mut Rltk) {
+pub fn draw_ui(ecs: &World, ctx : &mut Rltk) {
     ctx.draw_box(0, 43, 79, 6, RGB::named(rltk::WHITE), RGB::named(rltk::BLACK));
+
+    let map = ecs.fetch::<Map>();
+    let depth = format!("Depth: {}", map.depth);
+    ctx.print_color(2, 43, RGB::named(rltk::YELLOW), RGB::named(rltk::BLACK), &depth);
 
     let combat_stats = ecs.read_storage::<CombatStats>();
     let players = ecs.read_storage::<Player>();
@@ -21,41 +20,37 @@ pub fn draw_ui(ecs: &World, ctx: &mut Rltk) {
     }
 
     let log = ecs.fetch::<GameLog>();
-
     let mut y = 44;
     for s in log.entries.iter().rev() {
-        if y < 49 {
-            ctx.print(2, y, s);
-        }
+        if y < 49 { ctx.print(2, y, s); }
         y += 1;
     }
 
+    // Draw mouse cursor
+    let mouse_pos = ctx.mouse_pos();
+    ctx.set_bg(mouse_pos.0, mouse_pos.1, RGB::named(rltk::MAGENTA));
     draw_tooltips(ecs, ctx);
 }
 
-fn draw_tooltips(ecs: &World, ctx: &mut Rltk) {
+fn draw_tooltips(ecs: &World, ctx : &mut Rltk) {
     let map = ecs.fetch::<Map>();
     let names = ecs.read_storage::<Name>();
     let positions = ecs.read_storage::<Position>();
 
     let mouse_pos = ctx.mouse_pos();
-    if mouse_pos.0 >= map.width || mouse_pos.1 >= map.height {
-        return;
-    }
+    if mouse_pos.0 >= map.width || mouse_pos.1 >= map.height { return; }
     let mut tooltip : Vec<String> = Vec::new();
     for (name, position) in (&names, &positions).join() {
         let idx = map.xy_idx(position.x, position.y);
         if position.x == mouse_pos.0 && position.y == mouse_pos.1 && map.visible_tiles[idx] {
-            tooltip.push(name.name.to_string())
+            tooltip.push(name.name.to_string());
         }
     }
 
     if !tooltip.is_empty() {
         let mut width :i32 = 0;
         for s in tooltip.iter() {
-            if width < s.len() as i32 {
-                width = s.len() as i32;
-            }
+            if width < s.len() as i32 { width = s.len() as i32; }
         }
         width += 3;
 
@@ -64,21 +59,21 @@ fn draw_tooltips(ecs: &World, ctx: &mut Rltk) {
             let left_x = mouse_pos.0 - width;
             let mut y = mouse_pos.1;
             for s in tooltip.iter() {
-                ctx.print_color(left_x + 1, y, RGB::named(rltk::WHITE), RGB::named(rltk::GREY), s);
-                let padding = (width - s.len() as i32) - 1;
+                ctx.print_color(left_x, y, RGB::named(rltk::WHITE), RGB::named(rltk::GREY), s);
+                let padding = (width - s.len() as i32)-1;
                 for i in 0..padding {
-                    ctx.print_color(arrow_pos.x + 1 + i, y, RGB::named(rltk::WHITE), RGB::named(rltk::GREY), &" ".to_string());
+                    ctx.print_color(arrow_pos.x - i, y, RGB::named(rltk::WHITE), RGB::named(rltk::GREY), &" ".to_string());
                 }
                 y += 1;
             }
             ctx.print_color(arrow_pos.x, arrow_pos.y, RGB::named(rltk::WHITE), RGB::named(rltk::GREY), &"->".to_string());
         } else {
             let arrow_pos = Point::new(mouse_pos.0 + 1, mouse_pos.1);
-            let left_x = mouse_pos.0 + 3;
+            let left_x = mouse_pos.0 +3;
             let mut y = mouse_pos.1;
             for s in tooltip.iter() {
                 ctx.print_color(left_x + 1, y, RGB::named(rltk::WHITE), RGB::named(rltk::GREY), s);
-                let padding = (width - s.len() as i32) - 1;
+                let padding = (width - s.len() as i32)-1;
                 for i in 0..padding {
                     ctx.print_color(arrow_pos.x + 1 + i, y, RGB::named(rltk::WHITE), RGB::named(rltk::GREY), &" ".to_string());
                 }
@@ -106,7 +101,7 @@ pub fn show_inventory(gs : &mut State, ctx : &mut Rltk) -> (ItemMenuResult, Opti
     ctx.print_color(18, y-2, RGB::named(rltk::YELLOW), RGB::named(rltk::BLACK), "Inventory");
     ctx.print_color(18, y+count as i32+1, RGB::named(rltk::YELLOW), RGB::named(rltk::BLACK), "ESCAPE to cancel");
 
-    let mut equippable: Vec<Entity> = Vec::new();
+    let mut equippable : Vec<Entity> = Vec::new();
     let mut j = 0;
     for (entity, _pack, name) in (&entities, &backpack, &names).join().filter(|item| item.1.owner == *player_entity ) {
         ctx.set(17, y, RGB::named(rltk::WHITE), RGB::named(rltk::BLACK), rltk::to_cp437('('));
@@ -135,8 +130,6 @@ pub fn show_inventory(gs : &mut State, ctx : &mut Rltk) -> (ItemMenuResult, Opti
         }
     }
 }
-
-
 
 pub fn drop_item_menu(gs : &mut State, ctx : &mut Rltk) -> (ItemMenuResult, Option<Entity>) {
     let player_entity = gs.ecs.fetch::<Entity>();
@@ -170,11 +163,11 @@ pub fn drop_item_menu(gs : &mut State, ctx : &mut Rltk) -> (ItemMenuResult, Opti
         Some(key) => {
             match key {
                 VirtualKeyCode::Escape => { (ItemMenuResult::Cancel, None) }
-                _ => { 
+                _ => {
                     let selection = rltk::letter_to_option(key);
                     if selection > -1 && selection < count as i32 {
                         return (ItemMenuResult::Selected, Some(equippable[selection as usize]));
-                    }  
+                    }
                     (ItemMenuResult::NoResponse, None)
                 }
             }
@@ -224,7 +217,14 @@ pub fn ranged_target(gs : &mut State, ctx : &mut Rltk, range : i32) -> (ItemMenu
     (ItemMenuResult::NoResponse, None)
 }
 
+#[derive(PartialEq, Copy, Clone)]
+pub enum MainMenuSelection { NewGame, LoadGame, Quit }
+
+#[derive(PartialEq, Copy, Clone)]
+pub enum MainMenuResult { NoSelection{ selected : MainMenuSelection }, Selected{ selected: MainMenuSelection } }
+
 pub fn main_menu(gs : &mut State, ctx : &mut Rltk) -> MainMenuResult {
+    let save_exists = super::saveload_system::does_save_exist();
     let runstate = gs.ecs.fetch::<RunState>();
 
     ctx.print_color_centered(15, RGB::named(rltk::YELLOW), RGB::named(rltk::BLACK), "Rust Roguelike Tutorial");
@@ -236,10 +236,12 @@ pub fn main_menu(gs : &mut State, ctx : &mut Rltk) -> MainMenuResult {
             ctx.print_color_centered(24, RGB::named(rltk::WHITE), RGB::named(rltk::BLACK), "Begin New Game");
         }
 
-        if selection == MainMenuSelection::LoadGame {
-            ctx.print_color_centered(25, RGB::named(rltk::MAGENTA), RGB::named(rltk::BLACK), "Load Game");
-        } else {
-            ctx.print_color_centered(25, RGB::named(rltk::WHITE), RGB::named(rltk::BLACK), "Load Game");
+        if save_exists {
+            if selection == MainMenuSelection::LoadGame {
+                ctx.print_color_centered(25, RGB::named(rltk::MAGENTA), RGB::named(rltk::BLACK), "Load Game");
+            } else {
+                ctx.print_color_centered(25, RGB::named(rltk::WHITE), RGB::named(rltk::BLACK), "Load Game");
+            }
         }
 
         if selection == MainMenuSelection::Quit {
@@ -254,20 +256,26 @@ pub fn main_menu(gs : &mut State, ctx : &mut Rltk) -> MainMenuResult {
                 match key {
                     VirtualKeyCode::Escape => { return MainMenuResult::NoSelection{ selected: MainMenuSelection::Quit } }
                     VirtualKeyCode::Up => {
-                        let newselection;
+                        let mut newselection;
                         match selection {
                             MainMenuSelection::NewGame => newselection = MainMenuSelection::Quit,
                             MainMenuSelection::LoadGame => newselection = MainMenuSelection::NewGame,
                             MainMenuSelection::Quit => newselection = MainMenuSelection::LoadGame
                         }
+                        if newselection == MainMenuSelection::LoadGame && !save_exists {
+                            newselection = MainMenuSelection::NewGame;
+                        }
                         return MainMenuResult::NoSelection{ selected: newselection }
                     }
                     VirtualKeyCode::Down => {
-                        let newselection;
+                        let mut newselection;
                         match selection {
                             MainMenuSelection::NewGame => newselection = MainMenuSelection::LoadGame,
                             MainMenuSelection::LoadGame => newselection = MainMenuSelection::Quit,
                             MainMenuSelection::Quit => newselection = MainMenuSelection::NewGame
+                        }
+                        if newselection == MainMenuSelection::LoadGame && !save_exists {
+                            newselection = MainMenuSelection::Quit;
                         }
                         return MainMenuResult::NoSelection{ selected: newselection }
                     }

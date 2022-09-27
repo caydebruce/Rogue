@@ -1,5 +1,7 @@
+extern crate serde;
 use rltk::{GameState, Rltk, Point};
 use specs::prelude::*;
+use specs::saveload::{SimpleMarker, SimpleMarkerAllocator};
 
 mod components;
 pub use components::*;
@@ -24,19 +26,21 @@ mod gamelog;
 mod spawner;
 mod inventory_system;
 use inventory_system::{ ItemCollectionSystem, ItemUseSystem, ItemDropSystem };
+pub mod saveload_system;
 
 
 
 #[derive(PartialEq, Copy, Clone)]
-pub enum RunState { AwaitingInput, 
-    PreRun, 
-    PlayerTurn, 
-    MonsterTurn, 
-    ShowInventory, 
+pub enum RunState { AwaitingInput,
+    PreRun,
+    PlayerTurn,
+    MonsterTurn,
+    ShowInventory,
     ShowDropItem,
     ShowTargeting { range : i32, item : Entity},
-    MainMenu {menu_selection: gui::MainMenuSelection},
-    SaveGame
+    MainMenu { menu_selection : gui::MainMenuSelection },
+    SaveGame,
+    NextLevel
 }
 
 pub struct State {
@@ -68,7 +72,6 @@ impl State {
 
 impl GameState for State {
     fn tick(&mut self, ctx : &mut Rltk) {
-
         let mut newrunstate;
         {
             let runstate = self.ecs.fetch::<RunState>();
@@ -76,7 +79,7 @@ impl GameState for State {
         }
 
         ctx.cls();
-        
+
         match newrunstate {
             RunState::MainMenu{..} => {}
             _ => {
@@ -165,18 +168,27 @@ impl GameState for State {
             RunState::MainMenu{ .. } => {
                 let result = gui::main_menu(self, ctx);
                 match result {
-                    gui::MainMenuResult::NoSelection{selected} => newrunstate = RunState::MainMenu{menu_selection: selected},
-                    gui::MainMenuResult::Selected{selected} => {
+                    gui::MainMenuResult::NoSelection{ selected } => newrunstate = RunState::MainMenu{ menu_selection: selected },
+                    gui::MainMenuResult::Selected{ selected } => {
                         match selected {
                             gui::MainMenuSelection::NewGame => newrunstate = RunState::PreRun,
-                            gui::MainMenuSelection::LoadGame => newrunstate = RunState::PreRun,
-                            gui::MainMenuSelection::Quit => {::std::process::exit(0);}
+                            gui::MainMenuSelection::LoadGame => {
+                                saveload_system::load_game(&mut self.ecs);
+                                newrunstate = RunState::AwaitingInput;
+                                saveload_system::delete_save();
+                            }
+                            gui::MainMenuSelection::Quit => { ::std::process::exit(0); }
                         }
                     }
                 }
             }
             RunState::SaveGame => {
-                newrunstate = RunState::MainMenu{menu_selection: gui::MainMenuSelection::LoadGame};
+                saveload_system::save_game(&mut self.ecs);
+                newrunstate = RunState::MainMenu{ menu_selection : gui::MainMenuSelection::LoadGame };
+            }
+            RunState::NextLevel => {
+                self.goto_next_level();
+                newrunstate = RunState::PreRun;
             }
         }
 
@@ -188,10 +200,94 @@ impl GameState for State {
     }
 }
 
+impl State {
+    fn entities_to_remove_on_level_change(&mut self) -> Vec<Entity> {
+        let entities = self.ecs.entities();
+        let player = self.ecs.read_storage::<Player>();
+        let backpack = self.ecs.read_storage::<InBackpack>();
+        let player_entity = self.ecs.fetch::<Entity>();
+
+        let mut to_delete : Vec<Entity> = Vec::new();
+        for entity in entities.join() {
+            let mut should_delete = true;
+
+            // Don't delete the player
+            let p = player.get(entity);
+            if let Some(_p) = p {
+                should_delete = false;
+            }
+
+            // Don't delete the player's equipment
+            let bp = backpack.get(entity);
+            if let Some(bp) = bp {
+                if bp.owner == *player_entity {
+                    should_delete = false;
+                }
+            }
+
+            if should_delete {
+                to_delete.push(entity);
+            }
+        }
+
+        to_delete
+    }
+
+    fn goto_next_level(&mut self) {
+        // Delete entities that aren't the player or his/her equipment
+        let to_delete = self.entities_to_remove_on_level_change();
+        for target in to_delete {
+            self.ecs.delete_entity(target).expect("Unable to delete entity");
+        }
+
+        // Build a new map and place the player
+        let worldmap;
+        {
+            let mut worldmap_resource = self.ecs.write_resource::<Map>();
+            let current_depth = worldmap_resource.depth;
+            *worldmap_resource = Map::new_map_rooms_and_corridors(current_depth + 1);
+            worldmap = worldmap_resource.clone();
+        }
+
+        // Spawn bad guys
+        for room in worldmap.rooms.iter().skip(1) {
+            spawner::spawn_room(&mut self.ecs, room);
+        }
+
+        // Place the player and update resources
+        let (player_x, player_y) = worldmap.rooms[0].center();
+        let mut player_position = self.ecs.write_resource::<Point>();
+        *player_position = Point::new(player_x, player_y);
+        let mut position_components = self.ecs.write_storage::<Position>();
+        let player_entity = self.ecs.fetch::<Entity>();
+        let player_pos_comp = position_components.get_mut(*player_entity);
+        if let Some(player_pos_comp) = player_pos_comp {
+            player_pos_comp.x = player_x;
+            player_pos_comp.y = player_y;
+        }
+
+        // Mark the player's visibility as dirty
+        let mut viewshed_components = self.ecs.write_storage::<Viewshed>();
+        let vs = viewshed_components.get_mut(*player_entity);
+        if let Some(vs) = vs {
+            vs.dirty = true;
+        }
+
+        // Notify the player and give them some health
+        let mut gamelog = self.ecs.fetch_mut::<gamelog::GameLog>();
+        gamelog.entries.push("You descend to the next level, and take a moment to heal.".to_string());
+        let mut player_health_store = self.ecs.write_storage::<CombatStats>();
+        let player_health = player_health_store.get_mut(*player_entity);
+        if let Some(player_health) = player_health {
+            player_health.hp = i32::max(player_health.hp, player_health.max_hp / 2);
+        }
+    }
+}
+
 fn main() -> rltk::BError {
     use rltk::RltkBuilder;
     let mut context = RltkBuilder::simple80x50()
-        .with_title("Roguelike")
+        .with_title("Roguelike Tutorial")
         .build()?;
     context.with_post_scanlines(true);
     let mut gs = State {
@@ -218,8 +314,12 @@ fn main() -> rltk::BError {
     gs.ecs.register::<WantsToUseItem>();
     gs.ecs.register::<WantsToDropItem>();
     gs.ecs.register::<Confusion>();
+    gs.ecs.register::<SimpleMarker<SerializeMe>>();
+    gs.ecs.register::<SerializationHelper>();
 
-    let map : Map = Map::new_map_rooms_and_corridors();
+    gs.ecs.insert(SimpleMarkerAllocator::<SerializeMe>::new());
+
+    let map : Map = Map::new_map_rooms_and_corridors(1);
     let (player_x, player_y) = map.rooms[0].center();
 
     let player_entity = spawner::player(&mut gs.ecs, player_x, player_y);
@@ -232,7 +332,7 @@ fn main() -> rltk::BError {
     gs.ecs.insert(map);
     gs.ecs.insert(Point::new(player_x, player_y));
     gs.ecs.insert(player_entity);
-    gs.ecs.insert(RunState::PreRun);
+    gs.ecs.insert(RunState::MainMenu{ menu_selection: gui::MainMenuSelection::NewGame });
     gs.ecs.insert(gamelog::GameLog{ entries : vec!["Welcome to Rusty Roguelike".to_string()] });
 
     rltk::main_loop(context, gs)
